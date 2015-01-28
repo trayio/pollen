@@ -2,6 +2,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,11 +45,29 @@ func (s set) exists(key string) bool {
 	return ok
 }
 
+type stringFlags []string
+
+func (s *stringFlags) String() string {
+	return fmt.Sprint(*s)
+}
+
+func (s *stringFlags) Set(value string) error {
+	for _, v := range strings.Split(value, ",") {
+		*s = append(*s, v)
+	}
+	return nil
+}
+
 func main() {
-	dir := os.Args[1]
-	buildCmd := os.Args[2]
-	restartCmd := os.Args[3]
-	ignore := os.Args[4:]
+	var ignore stringFlags
+	var dir, buildCmd, restartCmd string
+	var debug bool
+	flag.Var(&ignore, "ignore", "comma-separated list of locations to ignore")
+	flag.StringVar(&dir, "dir", ".", "directory to watch")
+	flag.StringVar(&buildCmd, "buildCmd", "echo default build command", "build command")
+	flag.StringVar(&restartCmd, "restartCmd", "echo default restart command", "restart command")
+	flag.BoolVar(&debug, "debug", false, "debug logging")
+	flag.Parse()
 
 	action := func() {
 		{
@@ -118,7 +137,9 @@ func main() {
 					filtered.files = append(filtered.files, v)
 				}
 
-				//fmt.Printf("%#v\n", filtered)
+				if debug {
+					fmt.Printf("%#v\n", filtered)
+				}
 				if needsAction(previous, filtered) {
 					go action()
 				}
