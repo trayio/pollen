@@ -45,16 +45,29 @@ func (s set) exists(key string) bool {
 }
 
 func main() {
-	cmd := os.Args[1]
-	ignore := os.Args[2:]
+	buildCmd := os.Args[1]
+	restartCmd := os.Args[2]
+	ignore := os.Args[3:]
 
 	action := func() {
-		o, err := exec.Command("/bin/sh", "-c", cmd).CombinedOutput()
-		if err != nil {
-			fmt.Println(err)
-			return
+		{
+			fmt.Println("building...")
+			o, err := exec.Command("/bin/sh", "-c", buildCmd).CombinedOutput()
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			fmt.Println(string(o))
 		}
-		fmt.Println(string(o))
+		{
+			fmt.Println("restarting...")
+			o, err := exec.Command("/bin/sh", "-c", restartCmd).CombinedOutput()
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			fmt.Println(string(o))
+		}
 	}
 
 	state := make(chan *paths)
@@ -106,7 +119,6 @@ func main() {
 
 				//fmt.Printf("%#v\n", filtered)
 				if needsAction(previous, filtered) {
-					fmt.Println("reloading...")
 					go action()
 				}
 
