@@ -45,9 +45,10 @@ func (s set) exists(key string) bool {
 }
 
 func main() {
-	buildCmd := os.Args[1]
-	restartCmd := os.Args[2]
-	ignore := os.Args[3:]
+	dir := os.Args[1]
+	buildCmd := os.Args[2]
+	restartCmd := os.Args[3]
+	ignore := os.Args[4:]
 
 	action := func() {
 		{
@@ -80,7 +81,7 @@ func main() {
 				var files []string
 				var dirs []string
 
-				filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+				filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 					if err != nil {
 						fmt.Println(path, err)
 						// don't stop walking
