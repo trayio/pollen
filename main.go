@@ -97,49 +97,22 @@ func main() {
 		for {
 			select {
 			case <-tick.C:
-				var files []string
-				var dirs []string
-
-				filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						fmt.Println(path, err)
-						// don't stop walking
-						return nil
-					}
-					if info.IsDir() {
-						dirs = append(dirs, path)
-					} else {
-						files = append(files, path)
-					}
-					return nil
-				})
-				state <- &paths{files: files, dirs: dirs}
+				state <- walk(dir)
 			}
 		}
 	}()
 
 	go func() {
-		previous := &paths{}
+		previous := filter(walk(dir), ignore)
 		for {
 			select {
 			case p := <-state:
-				filtered := &paths{}
-				for _, v := range p.dirs {
-					if ignored(v, ignore) {
-						continue
-					}
-					filtered.dirs = append(filtered.dirs, v)
-				}
-				for _, v := range p.files {
-					if ignored(v, ignore) {
-						continue
-					}
-					filtered.files = append(filtered.files, v)
-				}
+				filtered := filter(p, ignore)
 
 				if debug {
 					fmt.Printf("%#v\n", filtered)
 				}
+
 				if needsAction(previous, filtered) {
 					go action()
 				}
@@ -150,6 +123,43 @@ func main() {
 	}()
 
 	<-(chan bool)(nil)
+}
+
+func filter(p *paths, ignore stringFlags) *paths {
+	filtered := &paths{}
+	for _, v := range p.dirs {
+		if ignored(v, ignore) {
+			continue
+		}
+		filtered.dirs = append(filtered.dirs, v)
+	}
+	for _, v := range p.files {
+		if ignored(v, ignore) {
+			continue
+		}
+		filtered.files = append(filtered.files, v)
+	}
+	return filtered
+}
+
+func walk(dir string) *paths {
+	var files, dirs []string
+
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Println(path, err)
+			// don't stop walking
+			return nil
+		}
+		if info.IsDir() {
+			dirs = append(dirs, path)
+		} else {
+			files = append(files, path)
+		}
+		return nil
+	})
+
+	return &paths{files: files, dirs: dirs}
 }
 
 func needsAction(previous *paths, current *paths) bool {
