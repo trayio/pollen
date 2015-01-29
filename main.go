@@ -91,38 +91,37 @@ func main() {
 	}
 
 	state := make(chan *paths)
-	go func() {
-		tick := time.NewTicker(3 * time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-tick.C:
-				state <- walk(dir)
-			}
-		}
-	}()
 
-	go func() {
+	{
 		previous := filter(walk(dir), ignore)
-		for {
-			select {
-			case p := <-state:
-				filtered := filter(p, ignore)
+		go func() {
+			for {
+				select {
+				case p := <-state:
+					filtered := filter(p, ignore)
 
-				if debug {
-					fmt.Printf("%#v\n", filtered)
+					if debug {
+						fmt.Printf("%#v\n", filtered)
+					}
+
+					if needsAction(previous, filtered) {
+						go action()
+					}
+
+					previous = filtered
 				}
-
-				if needsAction(previous, filtered) {
-					go action()
-				}
-
-				previous = filtered
 			}
-		}
-	}()
+		}()
+	}
 
-	<-(chan bool)(nil)
+	tick := time.NewTicker(3 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-tick.C:
+			state <- walk(dir)
+		}
+	}
 }
 
 func filter(p *paths, ignore stringFlags) *paths {
