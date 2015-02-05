@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -141,7 +143,7 @@ func filter(p *paths, ignore stringFlags) *paths {
 	return filtered
 }
 
-func walk(dir string) *paths {
+func oldWalk(dir string) *paths {
 	var files, dirs []string
 
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -159,6 +161,57 @@ func walk(dir string) *paths {
 	})
 
 	return &paths{files: files, dirs: dirs}
+}
+
+func walk(dir string) *paths {
+	var files, dirs []string
+	files, dirs, _ = doWalk(dir, files, dirs)
+	return &paths{files: files, dirs: dirs}
+}
+
+type fileType uint8
+
+const (
+	Unknown fileType = iota
+	File
+	Dir
+)
+
+func doWalk(dir string, files []string, dirs []string) ([]string, []string, fileType) {
+	var ft fileType
+
+	f, err := os.Open(dir)
+	if err != nil {
+		return files, dirs, ft
+	}
+
+	names, err := f.Readdirnames(-1)
+	f.Close()
+
+	if err != nil {
+		if serr, ok := err.(*os.SyscallError); ok {
+			if serr.Err == syscall.ENOTDIR {
+				ft = File
+			}
+		}
+	}
+
+	if ft != File {
+		ft = Dir
+	}
+
+	for _, n := range names {
+		p := path.Join(dir, n)
+		var ft fileType
+		files, dirs, ft = doWalk(p, files, dirs)
+		if ft == Dir {
+			dirs = append(dirs, p)
+		} else if ft == File {
+			files = append(files, p)
+		}
+	}
+
+	return files, dirs, ft
 }
 
 func needsAction(previous *paths, current *paths) bool {
