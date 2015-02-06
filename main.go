@@ -7,11 +7,20 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 )
+
+type fileType uint8
+
+const (
+	Unknown fileType = iota
+	File
+	Dir
+)
+
+type ignoredFunc func(string) bool
 
 type paths struct {
 	files []string
@@ -93,91 +102,53 @@ func main() {
 	}
 
 	state := make(chan *paths)
+	ignoredf := ignoredFunc(func(v string) bool {
+		return ignored(v, ignore)
+	})
 
 	{
-		previous := filter(walk(dir), ignore)
+		current := walk(dir, ignoredf)
+		previous := current
 		go func() {
+			tick := time.NewTicker(3 * time.Second)
+			defer tick.Stop()
 			for {
 				select {
-				case p := <-state:
-					filtered := filter(p, ignore)
-
+				case <-tick.C:
 					if debug {
-						fmt.Printf("%#v\n", filtered)
+						fmt.Println("scanning for modifications")
 					}
-
-					if needsAction(previous, filtered) {
+					if needsAction(previous, current) {
 						go action()
 					}
-
-					previous = filtered
+					previous = current
+				case p := <-state:
+					if debug {
+						fmt.Printf("crawl result: %#v\n", p)
+					}
+					current = p
 				}
 			}
 		}()
 	}
 
-	tick := time.NewTicker(3 * time.Second)
+	tick := time.NewTicker(7 * time.Second)
 	defer tick.Stop()
 	for {
 		select {
 		case <-tick.C:
-			state <- walk(dir)
+			state <- walk(dir, ignoredf)
 		}
 	}
 }
 
-func filter(p *paths, ignore stringFlags) *paths {
-	filtered := &paths{}
-	for _, v := range p.dirs {
-		if ignored(v, ignore) {
-			continue
-		}
-		filtered.dirs = append(filtered.dirs, v)
-	}
-	for _, v := range p.files {
-		if ignored(v, ignore) {
-			continue
-		}
-		filtered.files = append(filtered.files, v)
-	}
-	return filtered
-}
-
-func oldWalk(dir string) *paths {
+func walk(dir string, ignoredf ignoredFunc) *paths {
 	var files, dirs []string
-
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			fmt.Println(path, err)
-			// don't stop walking
-			return nil
-		}
-		if info.IsDir() {
-			dirs = append(dirs, path)
-		} else {
-			files = append(files, path)
-		}
-		return nil
-	})
-
+	files, dirs, _ = doWalk(dir, ignoredf, files, dirs)
 	return &paths{files: files, dirs: dirs}
 }
 
-func walk(dir string) *paths {
-	var files, dirs []string
-	files, dirs, _ = doWalk(dir, files, dirs)
-	return &paths{files: files, dirs: dirs}
-}
-
-type fileType uint8
-
-const (
-	Unknown fileType = iota
-	File
-	Dir
-)
-
-func doWalk(dir string, files []string, dirs []string) ([]string, []string, fileType) {
+func doWalk(dir string, ignoredf ignoredFunc, files []string, dirs []string) ([]string, []string, fileType) {
 	var ft fileType
 
 	f, err := os.Open(dir)
@@ -188,6 +159,7 @@ func doWalk(dir string, files []string, dirs []string) ([]string, []string, file
 	names, err := f.Readdirnames(-1)
 	f.Close()
 
+	// Linux
 	if err != nil {
 		if serr, ok := err.(*os.SyscallError); ok {
 			if serr.Err == syscall.ENOTDIR {
@@ -196,14 +168,26 @@ func doWalk(dir string, files []string, dirs []string) ([]string, []string, file
 		}
 	}
 
+	// On OS X Readdirnames doesn't return an error if we call it on a file so we
+	// assume it's a file if we found nothing. While this is incorrect people
+	// don't often have empty directories and worst case we'll just stat the
+	// directory as if it were a file later
+	if len(names) == 0 {
+		ft = File
+	}
+
 	if ft != File {
 		ft = Dir
 	}
 
 	for _, n := range names {
 		p := path.Join(dir, n)
+		if ignoredf(p) {
+			continue
+		}
+
 		var ft fileType
-		files, dirs, ft = doWalk(p, files, dirs)
+		files, dirs, ft = doWalk(p, ignoredf, files, dirs)
 		if ft == Dir {
 			dirs = append(dirs, p)
 		} else if ft == File {
