@@ -73,12 +73,16 @@ func main() {
 	var ignore stringFlags
 	var dir, buildCmd, restartCmd string
 	var debug bool
-	flag.Var(&ignore, "ignore", "comma-separated list of locations to ignore")
+	flag.Var(&ignore, "ignore", "comma-separated list of locations to ignore (relative to dir)")
 	flag.StringVar(&dir, "dir", ".", "directory to watch")
 	flag.StringVar(&buildCmd, "buildCmd", "echo default build command", "build command")
 	flag.StringVar(&restartCmd, "restartCmd", "echo default restart command", "restart command")
 	flag.BoolVar(&debug, "debug", false, "debug logging")
 	flag.Parse()
+
+	for k, v := range ignore {
+		ignore[k] = path.Join(dir, v)
+	}
 
 	actions := make(chan struct{}, 1)
 	go func() {
@@ -258,7 +262,7 @@ func formatTime(t time.Time) string {
 
 func ignored(v string, ignore []string) bool {
 	for _, ignore := range ignore {
-		if strings.HasPrefix(v, ignore) {
+		if v == ignore {
 			return true
 		}
 	}
