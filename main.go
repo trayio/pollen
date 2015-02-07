@@ -80,31 +80,34 @@ func main() {
 	flag.BoolVar(&debug, "debug", false, "debug logging")
 	flag.Parse()
 
-	action := func() {
-		{
-			fmt.Println("building...")
-			o, err := exec.Command("/bin/sh", "-c", buildCmd).CombinedOutput()
-			if err != nil {
-				fmt.Println(err)
-				return
+	actions := make(chan struct{}, 1)
+	go func() {
+		for _ = range actions {
+			{
+				fmt.Println("building...")
+				o, err := exec.Command("/bin/sh", "-c", buildCmd).CombinedOutput()
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				fmt.Println(string(o))
 			}
-			fmt.Println(string(o))
-		}
-		{
-			fmt.Println("restarting...")
-			o, err := exec.Command("/bin/sh", "-c", restartCmd).CombinedOutput()
-			if err != nil {
-				fmt.Println(err)
-				return
+			{
+				fmt.Println("restarting...")
+				o, err := exec.Command("/bin/sh", "-c", restartCmd).CombinedOutput()
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				fmt.Println(string(o))
 			}
-			fmt.Println(string(o))
 		}
-	}
+	}()
 
-	state := make(chan *paths)
 	ignoredf := ignoredFunc(func(v string) bool {
 		return ignored(v, ignore)
 	})
+	state := make(chan *paths)
 
 	{
 		current := walk(dir, ignoredf)
@@ -119,7 +122,11 @@ func main() {
 						fmt.Println("scanning for modifications")
 					}
 					if needsAction(previous, current) {
-						go action()
+						select {
+						case actions <- struct{}{}:
+						default:
+							// ensure non-blocking send
+						}
 					}
 					previous = current
 				case p := <-state:
