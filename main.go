@@ -12,13 +12,15 @@ import (
 	"time"
 )
 
-type fileType uint8
-
 const (
 	Unknown fileType = iota
 	File
 	Dir
 )
+
+type nothing struct{}
+
+type fileType uint8
 
 type ignoredFunc func(string) bool
 
@@ -28,11 +30,11 @@ type paths struct {
 }
 
 type set struct {
-	entries map[string]struct{}
+	entries map[string]nothing
 }
 
 func newSet(keys []string) *set {
-	s := &set{entries: make(map[string]struct{})}
+	s := &set{entries: make(map[string]nothing)}
 	s.addAll(keys)
 	return s
 }
@@ -44,7 +46,7 @@ func (s *set) addAll(keys []string) {
 }
 
 func (s *set) add(key string) {
-	s.entries[key] = struct{}{}
+	s.entries[key] = nothing{}
 }
 
 func (s *set) del(key string) {
@@ -70,7 +72,7 @@ func (s *stringFlags) Set(value string) error {
 }
 
 // runs in its own goroutine
-func actionLoop(actions <-chan struct{}, buildCmd, restartCmd string) {
+func actionLoop(actions <-chan nothing, buildCmd, restartCmd string) {
 	for _ = range actions {
 		{
 			fmt.Println("building...")
@@ -94,7 +96,7 @@ func actionLoop(actions <-chan struct{}, buildCmd, restartCmd string) {
 }
 
 // runs in its own goroutine
-func mtimeLoop(input <-chan *paths, actions chan<- struct{}, debug bool, ignoredf ignoredFunc) {
+func mtimeLoop(input <-chan *paths, actions chan<- nothing, debug bool, ignoredf ignoredFunc) {
 	current := <-input
 	previous := current
 	tick := time.NewTicker(3 * time.Second)
@@ -107,7 +109,7 @@ func mtimeLoop(input <-chan *paths, actions chan<- struct{}, debug bool, ignored
 			}
 			if needsAction(previous, current) {
 				select {
-				case actions <- struct{}{}:
+				case actions <- nothing{}:
 				default:
 					// ensure non-blocking send
 				}
@@ -254,7 +256,7 @@ func main() {
 	}
 
 	// buffered so we can always accept the next one while running an action
-	actionCh := make(chan struct{}, 1)
+	actionCh := make(chan nothing, 1)
 	go actionLoop(actionCh, buildCmd, restartCmd)
 
 	ignoredf := ignoredFunc(func(v string) bool {
