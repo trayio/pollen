@@ -96,7 +96,7 @@ func actionLoop(actions <-chan nothing, buildCmd, restartCmd string) {
 }
 
 // runs in its own goroutine
-func mtimeLoop(input <-chan *paths, actions chan<- nothing, debug bool, ignoredf ignoredFunc) {
+func mtimeLoop(input <-chan *paths, actions chan<- nothing, debug bool) {
 	current := <-input
 	previous := current
 	tick := time.NewTicker(3 * time.Second)
@@ -264,7 +264,7 @@ func main() {
 	})
 
 	mtimeCh := make(chan *paths)
-	go mtimeLoop(mtimeCh, actionCh, debug, ignoredf)
+	go mtimeLoop(mtimeCh, actionCh, debug)
 	mtimeCh <- walk(dir, ignoredf)
 
 	// dir tree crawl loop
