@@ -207,28 +207,36 @@ func needsAction(previous *paths, current *paths) bool {
 		return true
 	}
 
-	uniondirs := newSet(previous.dirs)
-	uniondirs.addAll(current.dirs)
+	{
+		uniondirs := newSet(previous.dirs)
+		uniondirs.addAll(current.dirs)
 
-	if len(uniondirs.entries) != len(previous.dirs) {
-		return true
+		if len(uniondirs.entries) != len(previous.dirs) {
+			return true
+		}
 	}
 
-	unionfiles := newSet(previous.files)
-	unionfiles.addAll(current.files)
+	{
+		unionfiles := newSet(previous.files)
+		unionfiles.addAll(current.files)
 
-	if len(unionfiles.entries) != len(previous.files) {
-		return true
+		if len(unionfiles.entries) != len(previous.files) {
+			return true
+		}
 	}
 
+	// check if files have been modified in the last couple of seconds
+	now := time.Now()
+	xSecsAgo := now.Add(-3 * time.Second)
 	for _, entry := range current.files {
-		if info, err := os.Stat(entry); err == nil {
-			// check if file has been modified in the last couple of seconds
-			since := time.Now().Add(-3 * time.Second)
-			if since.Before(info.ModTime()) {
-				fmt.Println("changed:", entry)
-				return true
+		if info, err := os.Stat(entry); err == nil && info.ModTime().After(xSecsAgo) {
+			if info.ModTime().After(now) {
+				fmt.Fprintf(os.Stderr, "WARNING: Skipping '%s' as it was modified in the future: file '%s', system '%s'\n",
+					entry, info.ModTime().Format("15:04:05.000"), now.Format("15:04:05.000"))
+				continue
 			}
+			fmt.Println("changed:", entry)
+			return true
 		}
 	}
 
