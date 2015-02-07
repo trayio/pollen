@@ -69,86 +69,55 @@ func (s *stringFlags) Set(value string) error {
 	return nil
 }
 
-func main() {
-	var ignore stringFlags
-	var dir, buildCmd, restartCmd string
-	var debug bool
-	flag.Var(&ignore, "ignore", "comma-separated list of locations to ignore (relative to dir)")
-	flag.StringVar(&dir, "dir", ".", "directory to watch")
-	flag.StringVar(&buildCmd, "buildCmd", "echo default build command", "build command")
-	flag.StringVar(&restartCmd, "restartCmd", "echo default restart command", "restart command")
-	flag.BoolVar(&debug, "debug", false, "debug logging")
-	flag.Parse()
-
-	for k, v := range ignore {
-		ignore[k] = path.Join(dir, v)
-	}
-
-	actions := make(chan struct{}, 1)
-	go func() {
-		for _ = range actions {
-			{
-				fmt.Println("building...")
-				o, err := exec.Command("/bin/sh", "-c", buildCmd).CombinedOutput()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "build", err)
-					return
-				}
-				fmt.Println(string(o))
+// runs in its own goroutine
+func actionLoop(actions <-chan struct{}, buildCmd, restartCmd string) {
+	for _ = range actions {
+		{
+			fmt.Println("building...")
+			o, err := exec.Command("/bin/sh", "-c", buildCmd).CombinedOutput()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "build", err)
+				return
 			}
-			{
-				fmt.Println("restarting...")
-				o, err := exec.Command("/bin/sh", "-c", restartCmd).CombinedOutput()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "restart", err)
-					return
-				}
-				fmt.Println(string(o))
-			}
+			fmt.Println(string(o))
 		}
-	}()
-
-	ignoredf := ignoredFunc(func(v string) bool {
-		return ignored(v, ignore)
-	})
-	state := make(chan *paths)
-
-	{
-		current := walk(dir, ignoredf)
-		previous := current
-		go func() {
-			tick := time.NewTicker(3 * time.Second)
-			defer tick.Stop()
-			for {
-				select {
-				case <-tick.C:
-					if debug {
-						fmt.Println("scanning for modifications")
-					}
-					if needsAction(previous, current) {
-						select {
-						case actions <- struct{}{}:
-						default:
-							// ensure non-blocking send
-						}
-					}
-					previous = current
-				case p := <-state:
-					if debug {
-						fmt.Printf("crawl result: %#v\n", p)
-					}
-					current = p
-				}
+		{
+			fmt.Println("restarting...")
+			o, err := exec.Command("/bin/sh", "-c", restartCmd).CombinedOutput()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "restart", err)
+				return
 			}
-		}()
+			fmt.Println(string(o))
+		}
 	}
+}
 
-	tick := time.NewTicker(7 * time.Second)
+// runs in its own goroutine
+func mtimeLoop(input <-chan *paths, actions chan<- struct{}, debug bool, ignoredf ignoredFunc) {
+	current := <-input
+	previous := current
+	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
 	for {
 		select {
 		case <-tick.C:
-			state <- walk(dir, ignoredf)
+			if debug {
+				fmt.Println("scanning for modifications")
+			}
+			if needsAction(previous, current) {
+				select {
+				case actions <- struct{}{}:
+				default:
+					// ensure non-blocking send
+				}
+			}
+			previous = current
+		case p := <-input:
+			if debug {
+				fmt.Printf("crawl result: %#v\n", p)
+			}
+			current = p
 		}
 	}
 }
@@ -267,4 +236,42 @@ func ignored(v string, ignore []string) bool {
 		}
 	}
 	return false
+}
+
+func main() {
+	var ignore stringFlags
+	var dir, buildCmd, restartCmd string
+	var debug bool
+	flag.Var(&ignore, "ignore", "comma-separated list of locations to ignore (relative to dir)")
+	flag.StringVar(&dir, "dir", ".", "directory to watch")
+	flag.StringVar(&buildCmd, "buildCmd", "echo default build command", "build command")
+	flag.StringVar(&restartCmd, "restartCmd", "echo default restart command", "restart command")
+	flag.BoolVar(&debug, "debug", false, "debug logging")
+	flag.Parse()
+
+	for k, v := range ignore {
+		ignore[k] = path.Join(dir, v)
+	}
+
+	// buffered so we can always accept the next one while running an action
+	actionCh := make(chan struct{}, 1)
+	go actionLoop(actionCh, buildCmd, restartCmd)
+
+	ignoredf := ignoredFunc(func(v string) bool {
+		return ignored(v, ignore)
+	})
+
+	mtimeCh := make(chan *paths)
+	go mtimeLoop(mtimeCh, actionCh, debug, ignoredf)
+	mtimeCh <- walk(dir, ignoredf)
+
+	// dir tree crawl loop
+	tick := time.NewTicker(7 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-tick.C:
+			mtimeCh <- walk(dir, ignoredf)
+		}
+	}
 }
