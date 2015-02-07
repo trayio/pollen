@@ -87,7 +87,7 @@ func main() {
 				fmt.Println("building...")
 				o, err := exec.Command("/bin/sh", "-c", buildCmd).CombinedOutput()
 				if err != nil {
-					fmt.Println(err)
+					fmt.Fprintln(os.Stderr, "build", err)
 					return
 				}
 				fmt.Println(string(o))
@@ -96,7 +96,7 @@ func main() {
 				fmt.Println("restarting...")
 				o, err := exec.Command("/bin/sh", "-c", restartCmd).CombinedOutput()
 				if err != nil {
-					fmt.Println(err)
+					fmt.Fprintln(os.Stderr, "restart", err)
 					return
 				}
 				fmt.Println(string(o))
@@ -160,18 +160,20 @@ func doWalk(dir string, ignoredf ignoredFunc, files []string, dirs []string) ([]
 
 	f, err := os.Open(dir)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "open dir %s: %s\n", dir, err)
 		return files, dirs, ft
 	}
 
 	names, err := f.Readdirnames(-1)
 	f.Close()
 
-	// Linux
 	if err != nil {
-		if serr, ok := err.(*os.SyscallError); ok {
-			if serr.Err == syscall.ENOTDIR {
-				ft = File
-			}
+		// On Linux calling Readdirnames with a file returns an error
+		if serr, ok := err.(*os.SyscallError); ok && serr.Err == syscall.ENOTDIR {
+			ft = File
+		} else {
+			fmt.Fprintln(os.Stderr, "Readdirnames", err)
+			return files, dirs, ft
 		}
 	}
 
