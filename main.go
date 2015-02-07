@@ -241,7 +241,7 @@ func needsAction(previous *paths, current *paths) bool {
 		if info, err := os.Stat(entry); err == nil && info.ModTime().After(xSecsAgo) {
 			if info.ModTime().After(now) {
 				fmt.Fprintf(os.Stderr, "WARNING: Skipping '%s' as it was modified in the future: file '%s', system '%s'\n",
-					entry, info.ModTime().Format("15:04:05.000"), now.Format("15:04:05.000"))
+					entry, formatTime(info.ModTime()), formatTime(now))
 				continue
 			}
 			fmt.Println("changed:", entry)
@@ -250,6 +250,10 @@ func needsAction(previous *paths, current *paths) bool {
 	}
 
 	return false
+}
+
+func formatTime(t time.Time) string {
+	return t.Format("15:04:05.000")
 }
 
 func ignored(v string, ignore []string) bool {
