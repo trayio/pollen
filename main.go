@@ -18,6 +18,9 @@ const (
 	Dir
 )
 
+// last seen mtimes of all the files we know about
+var mtimes = make(map[string]time.Time)
+
 type nothing struct{}
 
 type fileType uint8
@@ -99,6 +102,15 @@ func actionLoop(actions <-chan nothing, buildCmd, restartCmd string) {
 func mtimeLoop(input <-chan *paths, actions chan<- nothing, debug bool) {
 	current := <-input
 	previous := current
+	{
+		// we are only interested in changes since the start of the program so we
+		// let this be the start time for comparisons because it's easier than
+		// going in and stat everything right at the start
+		initTime := time.Now()
+		for _, entry := range current.files {
+			mtimes[entry] = initTime
+		}
+	}
 	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
 	for {
@@ -183,11 +195,9 @@ func doWalk(dir string, ignoredf ignoredFunc, files []string, dirs []string) ([]
 }
 
 func needsAction(previous *paths, current *paths) bool {
+	// we only take these shortcuts for dirs because we want to keep the file
+	// mtimes updated
 	if len(previous.dirs) != len(current.dirs) {
-		return true
-	}
-
-	if len(previous.files) != len(current.files) {
 		return true
 	}
 
@@ -200,31 +210,32 @@ func needsAction(previous *paths, current *paths) bool {
 		}
 	}
 
-	{
-		unionfiles := newSet(previous.files)
-		unionfiles.addAll(current.files)
-
-		if len(unionfiles.entries) != len(previous.files) {
-			return true
-		}
-	}
-
-	// check if files have been modified in the last couple of seconds
+	// check if files have been modified since last time we saw them
 	now := time.Now()
-	xSecsAgo := now.Add(-3 * time.Second)
+	var changed bool
 	for _, entry := range current.files {
-		if info, err := os.Stat(entry); err == nil && info.ModTime().After(xSecsAgo) {
+		prevMtime, ok := mtimes[entry]
+		if !ok {
+			// arbitrary time sufficiently in the past - new file so always modified
+			prevMtime = now.Add(-30 * time.Minute)
+		}
+		if info, err := os.Stat(entry); err == nil {
 			if info.ModTime().After(now) {
 				fmt.Fprintf(os.Stderr, "WARNING: Skipping '%s' as it was modified in the future: file '%s', system '%s'\n",
 					entry, formatTime(info.ModTime()), formatTime(now))
 				continue
 			}
-			fmt.Println("changed:", entry)
-			return true
+
+			if info.ModTime().After(prevMtime) {
+				fmt.Println("changed:", entry)
+				changed = true
+			}
+
+			mtimes[entry] = info.ModTime()
 		}
 	}
 
-	return false
+	return changed
 }
 
 func formatTime(t time.Time) string {
@@ -268,7 +279,7 @@ func main() {
 	mtimeCh <- walk(dir, ignoredf)
 
 	// dir tree crawl loop
-	tick := time.NewTicker(7 * time.Second)
+	tick := time.NewTicker(6 * time.Second)
 	defer tick.Stop()
 	for {
 		select {
