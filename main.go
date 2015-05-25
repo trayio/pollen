@@ -2,6 +2,8 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -74,26 +76,40 @@ func (s *stringFlags) Set(value string) error {
 	return nil
 }
 
+func execTimeout(name string, command string) error {
+	fmt.Printf("%sing...\n", name)
+	cmd := exec.Command("/bin/sh", "-c", command)
+
+	var b bytes.Buffer
+	cmd.Stdout = &b
+	cmd.Stderr = &b
+
+	err := cmd.Start()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, name, err)
+		return err
+	}
+	done := make(chan error)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			fmt.Fprintln(os.Stderr, name, err)
+			return err
+		}
+	case <-time.After(20 * time.Second):
+		fmt.Fprintln(os.Stderr, name, "timed out")
+		return errors.New(fmt.Sprintf("%s timed out"))
+	}
+	fmt.Println(b.String())
+	return nil
+}
+
 // runs in its own goroutine
 func actionLoop(actions <-chan nothing, buildCmd, restartCmd string) {
 	for _ = range actions {
-		{
-			fmt.Println("building...")
-			o, err := exec.Command("/bin/sh", "-c", buildCmd).CombinedOutput()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "build", err)
-				return
-			}
-			fmt.Println(string(o))
-		}
-		{
-			fmt.Println("restarting...")
-			o, err := exec.Command("/bin/sh", "-c", restartCmd).CombinedOutput()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "restart", err)
-				return
-			}
-			fmt.Println(string(o))
+		if err := execTimeout("build", buildCmd); err == nil {
+			execTimeout("restart", restartCmd)
 		}
 	}
 }
